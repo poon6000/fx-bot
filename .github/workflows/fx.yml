@@ -1,0 +1,21 @@
+name: Send USD/THB to Lark
+
+on:
+  schedule:
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+
+jobs:
+  send-rate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get USD/THB
+        run: |
+          RATE=$(curl -s https://api.exchangerate-api.com/v4/latest/USD | jq .rates.THB)
+          echo "RATE=$RATE" >> $GITHUB_ENV
+
+      - name: Send to Lark
+        run: |
+          curl -X POST ${{ secrets.LARK_WEBHOOK }} \
+          -H "Content-Type: application/json" \
+          -d "{\"msg_type\":\"text\",\"content\":{\"text\":\"USD/THB วันนี้: $RATE\"}}"
