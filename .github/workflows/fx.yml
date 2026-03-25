@@ -12,10 +12,12 @@ jobs:
       - name: Get USD/THB
         run: |
           RATE=$(curl -s https://api.exchangerate-api.com/v4/latest/USD | jq .rates.THB)
+	    DATE=$(date '+%m-%d-%Y')
           echo "RATE=$RATE" >> $GITHUB_ENV
+	  echo "DATE=$DATE" >> $GITHUB_ENV
 
       - name: Send to Lark
         run: |
           curl -X POST ${{ secrets.LARK_WEBHOOK }} \
           -H "Content-Type: application/json" \
-          -d "{\"msg_type\":\"text\",\"content\":{\"text\":\"USD/THB วันนี้: $RATE\"}}"
+          -d "{\"msg_type\":\"text\",\"content\":{\"text\":\"📅 $DATE\n💱 USD/THB: $RATE\"}}"
