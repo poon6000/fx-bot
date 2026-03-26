@@ -2,7 +2,7 @@ name: Send USD/THB to Lark
 
 on:
   schedule:
-    - cron: '25 3 * * *'
+    - cron: '27 3 * * *'
   workflow_dispatch:
 
 jobs:
