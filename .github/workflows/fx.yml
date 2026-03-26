@@ -18,6 +18,6 @@ jobs:
 
       - name: Send to Lark
         run: |
-          curl -X POST ${{ secrets.LARK_WEBHOOK }} \
+          curl -X POST "${{ secrets.LARK_WEBHOOK }}" \
           -H "Content-Type: application/json" \
           -d "{\"msg_type\":\"text\",\"content\":{\"text\":\"📅 $DATE\n💱 USD/THB: $RATE\"}}"
