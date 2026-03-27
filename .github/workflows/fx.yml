@@ -11,130 +11,29 @@ jobs:
 
     steps:
 
-      # =========================
-      # INSTALL DEPENDENCIES
-      # =========================
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y jq bc
-
-      # =========================
-      # FETCH CURRENT RATE
-      # =========================
-
-      - name: Get USD/THB
+      - name: Fetch rate & send to Lark
         run: |
           set -euo pipefail
 
-          RATE=$(curl -sf \
-            "https://open.er-api.com/v6/latest/USD" \
-            | jq -r .rates.THB)
+          # Fetch rate (raw)
+          RAW_RATE=$(curl -sf https://open.er-api.com/v6/latest/USD | jq -r .rates.THB)
 
-          if [ -z "$RATE" ] || [ "$RATE" = "null" ]; then
-            echo "❌ Failed to fetch rate"
-            exit 1
-          fi
+          # Format to 2 decimals
+          RATE=$(printf "%.2f" "$RAW_RATE")
 
           DATE=$(TZ='Asia/Bangkok' date '+%Y-%m-%d')
 
-          echo "RATE=$RATE" >> $GITHUB_ENV
-          echo "DATE=$DATE" >> $GITHUB_ENV
-
-      # =========================
-      # CALCULATE CHANGE + TREND
-      # =========================
-
-      - name: Calculate change
-        run: |
-          set -euo pipefail
-
-          TODAY="$RATE"
-
-          # (⚠️ still same API, so change = 0.00)
-          PREV=$(curl -sf \
-            "https://open.er-api.com/v6/latest/USD" \
-            | jq -r .rates.THB)
-
-          CHANGE=$(echo "$TODAY - $PREV" | bc)
-          CHANGE=$(printf "%.2f" "$CHANGE")
-
-          if (( $(echo "$CHANGE > 0" | bc -l) )); then
-            CHANGE="+$CHANGE"
-            TREND="📈"
-          elif (( $(echo "$CHANGE < 0" | bc -l) )); then
-            TREND="📉"
-          else
-            TREND="➡️"
-          fi
-
-          echo "CHANGE=$CHANGE" >> $GITHUB_ENV
-          echo "TREND=$TREND" >> $GITHUB_ENV
-
-      # =========================
-      # SEND LARK CARD
-      # =========================
-
-      - name: Send Lark Card
-        run: |
-          set -euo pipefail
-
-          # ✅ FORCE FORMAT HERE (important)
-          RATE=$(printf "%.2f" "$RATE")
-          CHANGE=$(printf "%.2f" "$CHANGE")
-
-          JSON=$(jq -n \
-            --arg date "$DATE" \
-            --arg rate "$RATE" \
-            --arg change "$CHANGE" \
-            --arg trend "$TREND" \
-            '{
-              msg_type: "interactive",
-              card: {
-                header: {
-                  title: {
-                    tag: "plain_text",
-                    content: ($trend + " USD/THB Exchange Rate")
-                  },
-                  template: "blue"
-                },
-                elements: [
-                  {
-                    tag: "div",
-                    text: {
-                      tag: "lark_md",
-                      content: "**📅 Date:** \($date)"
-                    }
-                  },
-                  {
-                    tag: "div",
-                    text: {
-                      tag: "lark_md",
-                      content: "**💱 Rate:** \($rate) THB"
-                    }
-                  },
-                  {
-                    tag: "div",
-                    text: {
-                      tag: "lark_md",
-                      content: "**📊 Change:** \($change) THB"
-                    }
-                  }
-                ]
-              }
-            }')
-
-          RESPONSE=$(curl -s -X POST \
-            "${{ secrets.LARK_WEBHOOK }}" \
+          # Send to Lark
+          curl -X POST "${{ secrets.LARK_WEBHOOK }}" \
             -H "Content-Type: application/json" \
-            -d "$JSON")
+            -d "{
+              \"msg_type\": \"text\",
+              \"content\": {
+                \"text\": \"➡️ USD/THB Exchange Rate\n📅 Date: $DATE\n💱 Rate: $RATE THB\"
+              }
+            }"
 
-          CODE=$(echo "$RESPONSE" | jq -r .code)
-
-          if [ "$CODE" != "0" ]; then
-            echo "❌ Lark error: $RESPONSE"
-            exit 1
-          fi
-
-          echo "✅ Message sent successfully!"
+          echo "✅ Sent: $RATE THB"
