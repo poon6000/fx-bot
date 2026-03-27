@@ -1,39 +1,166 @@
-name: Send USD/THB to Lark
+name: FX Rate Bot - Unbreakable (RMB)
 
 on:
   schedule:
     - cron: '0 1 * * 1-5'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
-  send-rate:
+  fx-bot:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
 
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-      - name: Fetch rate & send to Lark
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y jq bc
+
+      - name: Run FX bot (safe mode)
+        id: fx
+        continue-on-error: true
         run: |
           set -euo pipefail
 
-          # Fetch rate (raw)
-          RAW_RATE=$(curl -sf https://open.er-api.com/v6/latest/USD | jq -r .rates.THB)
+          echo "⏰ FX bot started at $(date)"
 
-          # Format to 2 decimals
-          RATE=$(printf "%.2f" "$RAW_RATE")
+          FILE_USD="usd_rate.txt"
+          FILE_RMB="rmb_rate.txt"
+          HISTORY="history.csv"
 
           DATE=$(TZ='Asia/Bangkok' date '+%Y-%m-%d')
+          DAY=$(TZ='Asia/Bangkok' date '+%u')
 
-          # Send to Lark
+          # =========================
+          # FETCH DATA (RETRY SAFE)
+          # =========================
+          DATA=$(curl -sf --retry 3 --retry-delay 5 https://open.er-api.com/v6/latest/USD)
+
+          USD=$(echo "$DATA" | jq -r .rates.THB)
+          RMB=$(echo "$DATA" | jq -r '.rates.THB / .rates.CNY')
+
+          USD=$(printf "%.2f" "$USD")
+          RMB=$(printf "%.2f" "$RMB")
+
+          # =========================
+          # LOAD PREVIOUS
+          # =========================
+          PREV_USD=$( [ -f "$FILE_USD" ] && cat "$FILE_USD" || echo "$USD" )
+          PREV_RMB=$( [ -f "$FILE_RMB" ] && cat "$FILE_RMB" || echo "$RMB" )
+
+          CHANGE_USD=$(printf "%.2f" $(echo "$USD - $PREV_USD" | bc))
+          CHANGE_RMB=$(printf "%.2f" $(echo "$RMB - $PREV_RMB" | bc))
+
+          ALERT=""
+
+          if (( $(echo "$CHANGE_USD > 0" | bc -l) )); then
+            TREND="📈"
+            COLOR="green"
+            CHANGE_USD="+$CHANGE_USD"
+          elif (( $(echo "$CHANGE_USD < 0" | bc -l) )); then
+            TREND="📉"
+            COLOR="red"
+          else
+            TREND="➡️"
+            COLOR="grey"
+          fi
+
+          ABS_CHANGE=$(echo "$CHANGE_USD" | sed 's/+//' | awk '{print ($1<0)?-$1:$1}')
+          if (( $(echo "$ABS_CHANGE > 0.5" | bc -l) )); then
+            ALERT="🚨 Significant move detected!"
+          fi
+
+          if (( $(echo "$CHANGE_RMB > 0" | bc -l) )); then
+            CHANGE_RMB="+$CHANGE_RMB"
+          fi
+
+          # =========================
+          # SAVE DATA
+          # =========================
+          echo "$USD" > "$FILE_USD"
+          echo "$RMB" > "$FILE_RMB"
+          echo "$DATE,$USD,$RMB" >> "$HISTORY"
+
+          # =========================
+          # WEEKLY SUMMARY
+          # =========================
+          SUMMARY=""
+          if [ "$DAY" = "5" ] && [ -f "$HISTORY" ]; then
+            WEEK_START=$(tail -n 5 "$HISTORY" | head -n 1 | cut -d',' -f2)
+            WEEK_END=$USD
+            WEEK_CHANGE=$(printf "%.2f" $(echo "$WEEK_END - $WEEK_START" | bc))
+            SUMMARY="📊 Weekly Change: $WEEK_CHANGE THB"
+          fi
+
+          # =========================
+          # BUILD CARD
+          # =========================
+          JSON=$(jq -n \
+            --arg date "$DATE" \
+            --arg usd "$USD" \
+            --arg rmb "$RMB" \
+            --arg change_usd "$CHANGE_USD" \
+            --arg change_rmb "$CHANGE_RMB" \
+            --arg trend "$TREND" \
+            --arg color "$COLOR" \
+            --arg alert "$ALERT" \
+            --arg summary "$SUMMARY" \
+            '{
+              msg_type: "interactive",
+              card: {
+                header: {
+                  title: {
+                    tag: "plain_text",
+                    content: ($trend + " FX Market Update")
+                  },
+                  template: $color
+                },
+                elements: [
+                  { tag: "div", text: { tag: "lark_md", content: "**📅 Date:** \($date)" } },
+                  { tag: "hr" },
+                  { tag: "div", text: { tag: "lark_md", content: "**💱 USD/THB:** \($usd)\n📊 \($change_usd)" } },
+                  { tag: "div", text: { tag: "lark_md", content: "**💱 RMB/THB:** \($rmb)\n📊 \($change_rmb)" } },
+                  { tag: "div", text: { tag: "lark_md", content: "\($alert)" } },
+                  { tag: "div", text: { tag: "lark_md", content: "\($summary)" } },
+                  { tag: "hr" },
+                  { tag: "note", elements: [ { tag: "plain_text", content: "FX Bot • Always Watching 👀" } ] }
+                ]
+              }
+            }')
+
+          curl -s -X POST "${{ secrets.LARK_WEBHOOK }}" \
+            -H "Content-Type: application/json" \
+            -d "$JSON"
+
+      # =========================
+      # 🚨 FAIL ALERT (KEY FEATURE)
+      # =========================
+      - name: Send error alert if failed
+        if: steps.fx.outcome == 'failure'
+        run: |
           curl -X POST "${{ secrets.LARK_WEBHOOK }}" \
             -H "Content-Type: application/json" \
-            -d "{
-              \"msg_type\": \"text\",
-              \"content\": {
-                \"text\": \"➡️ USD/THB Exchange Rate\n📅 Date: $DATE\n💱 Rate: $RATE THB\"
+            -d '{
+              "msg_type": "text",
+              "content": {
+                "text": "🚨 FX BOT FAILED\nCheck GitHub Actions immediately."
               }
-            }"
+            }'
 
-          echo "✅ Sent: $RATE THB"
+      # =========================
+      # SAFE COMMIT
+      # =========================
+      - name: Commit data safely
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+
+          git add *.txt *.csv
+          git commit -m "Update FX data" || echo "No changes"
+
+          git push || echo "Push failed (safe ignore)"
