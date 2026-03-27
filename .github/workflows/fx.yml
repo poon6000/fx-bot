@@ -36,7 +36,7 @@ jobs:
             echo "❌ Failed to fetch rate"
             exit 1
           fi
-
+          RATE=$(printf "%.2f" "$RATE")
           DATE=$(TZ='Asia/Bangkok' date '+%Y-%m-%d')
 
           echo "RATE=$RATE" >> $GITHUB_ENV
