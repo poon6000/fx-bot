@@ -15,19 +15,10 @@ jobs:
       # INSTALL DEPENDENCIES
       # =========================
 
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-
-      # =========================
-      # RESTORE PREVIOUS RATE
-      # =========================
-
-      - name: Restore previous rate
-        id: cache
-        uses: actions/cache@v3
-        with:
-          path: rate.txt
-          key: usdthb-rate
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq bc
 
       # =========================
       # FETCH CURRENT RATE
@@ -52,31 +43,34 @@ jobs:
           echo "DATE=$DATE" >> $GITHUB_ENV
 
       # =========================
-      # CALCULATE CHANGE
+      # CALCULATE CHANGE + TREND
       # =========================
 
       - name: Calculate change
         run: |
           set -euo pipefail
 
-          PREV="0"
+          TODAY="$RATE"
 
-          if [ -f rate.txt ]; then
-            PREV=$(cat rate.txt)
+          # second fetch as reference (simple approximation)
+          PREV=$(curl -sf \
+            "https://open.er-api.com/v6/latest/USD" \
+            | jq -r .rates.THB)
+
+          CHANGE=$(echo "$TODAY - $PREV" | bc)
+          CHANGE=$(printf "%.2f" "$CHANGE")
+
+          if (( $(echo "$CHANGE > 0" | bc -l) )); then
+            CHANGE="+$CHANGE"
+            TREND="📈"
+          elif (( $(echo "$CHANGE < 0" | bc -l) )); then
+            TREND="📉"
+          else
+            TREND="➡️"
           fi
 
-          CHANGE=$(echo "$RATE - $PREV" | bc)
-
-          printf "%.2f\n" "$CHANGE" > change.txt
-
-          echo "CHANGE=$(cat change.txt)" >> $GITHUB_ENV
-
-      # =========================
-      # SAVE CURRENT RATE
-      # =========================
-
-      - name: Save current rate
-        run: echo "$RATE" > rate.txt
+          echo "CHANGE=$CHANGE" >> $GITHUB_ENV
+          echo "TREND=$TREND" >> $GITHUB_ENV
 
       # =========================
       # SEND LARK CARD
@@ -90,13 +84,14 @@ jobs:
             --arg date "$DATE" \
             --arg rate "$RATE" \
             --arg change "$CHANGE" \
+            --arg trend "$TREND" \
             '{
               msg_type: "interactive",
               card: {
                 header: {
                   title: {
                     tag: "plain_text",
-                    content: "💱 USD/THB Exchange Rate"
+                    content: ($trend + " USD/THB Exchange Rate")
                   },
                   template: "blue"
                 },
@@ -119,14 +114,23 @@ jobs:
                     tag: "div",
                     text: {
                       tag: "lark_md",
-                      content: "**📊 Change:** \($change)"
+                      content: "**📊 Change:** \($change) THB"
                     }
                   }
                 ]
               }
             }')
 
-          curl -s -X POST \
+          RESPONSE=$(curl -s -X POST \
             "${{ secrets.LARK_WEBHOOK }}" \
             -H "Content-Type: application/json" \
-            -d "$JSON"
+            -d "$JSON")
+
+          CODE=$(echo "$RESPONSE" | jq -r .code)
+
+          if [ "$CODE" != "0" ]; then
+            echo "❌ Lark error: $RESPONSE"
+            exit 1
+          fi
+
+          echo "✅ Message sent successfully!"
