@@ -127,6 +127,6 @@ jobs:
             }')
 
           curl -s -X POST \
-            "${{ https://open.larksuite.com/open-apis/bot/v2/hook/a8210dc4-64fb-432d-a6b0-5acced3fc56f }}" \
+            "${{ secrets.LARK_WEBHOOK }}" \
             -H "Content-Type: application/json" \
             -d "$JSON"
