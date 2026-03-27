@@ -19,36 +19,80 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y jq
 
       # =========================
-      # FETCH DATA
+      # RESTORE PREVIOUS RATE
+      # =========================
+
+      - name: Restore previous rate
+        id: cache
+        uses: actions/cache@v3
+        with:
+          path: rate.txt
+          key: usdthb-rate
+
+      # =========================
+      # FETCH CURRENT RATE
       # =========================
 
       - name: Get USD/THB
         run: |
-          RATE=$(curl -s \
+          set -euo pipefail
+
+          RATE=$(curl -sf \
             "https://open.er-api.com/v6/latest/USD" \
             | jq -r .rates.THB)
 
-          DATE=$(TZ='Asia/Bangkok' \
-            date '+%Y-%m-%d')
+          if [ -z "$RATE" ] || [ "$RATE" = "null" ]; then
+            echo "❌ Failed to fetch rate"
+            exit 1
+          fi
+
+          DATE=$(TZ='Asia/Bangkok' date '+%Y-%m-%d')
 
           echo "RATE=$RATE" >> $GITHUB_ENV
           echo "DATE=$DATE" >> $GITHUB_ENV
 
       # =========================
-      # BUILD & SEND CARD
+      # CALCULATE CHANGE
+      # =========================
+
+      - name: Calculate change
+        run: |
+          set -euo pipefail
+
+          PREV="0"
+
+          if [ -f rate.txt ]; then
+            PREV=$(cat rate.txt)
+          fi
+
+          CHANGE=$(echo "$RATE - $PREV" | bc)
+
+          printf "%.2f\n" "$CHANGE" > change.txt
+
+          echo "CHANGE=$(cat change.txt)" >> $GITHUB_ENV
+
+      # =========================
+      # SAVE CURRENT RATE
+      # =========================
+
+      - name: Save current rate
+        run: echo "$RATE" > rate.txt
+
+      # =========================
+      # SEND LARK CARD
       # =========================
 
       - name: Send Lark Card
         run: |
+          set -euo pipefail
+
           JSON=$(jq -n \
             --arg date "$DATE" \
             --arg rate "$RATE" \
+            --arg change "$CHANGE" \
             '{
               msg_type: "interactive",
               card: {
-                config: {
-                  wide_screen_mode: true
-                },
                 header: {
                   title: {
                     tag: "plain_text",
@@ -68,7 +112,14 @@ jobs:
                     tag: "div",
                     text: {
                       tag: "lark_md",
-                      content: "**💱 Rate:** \($rate)"
+                      content: "**💱 Rate:** \($rate) THB"
+                    }
+                  },
+                  {
+                    tag: "div",
+                    text: {
+                      tag: "lark_md",
+                      content: "**📊 Change:** \($change)"
                     }
                   }
                 ]
@@ -76,6 +127,6 @@ jobs:
             }')
 
           curl -s -X POST \
-            "${{ https://open.larksuite.com/open-apis/bot/v2/hook/a8210dc4-64fb-432d-a6b0-5acced3fc56f }}" \
+            "${{ secrets.LARK_WEBHOOK }}" \
             -H "Content-Type: application/json" \
             -d "$JSON"
