@@ -8,16 +8,74 @@ on:
 jobs:
   send-rate:
     runs-on: ubuntu-latest
+
     steps:
+
+      # =========================
+      # INSTALL DEPENDENCIES
+      # =========================
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      # =========================
+      # FETCH DATA
+      # =========================
+
       - name: Get USD/THB
         run: |
-          RATE=$(curl -s https://api.exchangerate-api.com/v4/latest/USD | jq .rates.THB)
-          DATE=$(TZ='Asia/Bangkok' date '+%Y-%m-%d')
+          RATE=$(curl -s \
+            "https://open.er-api.com/v6/latest/USD" \
+            | jq -r .rates.THB)
+
+          DATE=$(TZ='Asia/Bangkok' \
+            date '+%Y-%m-%d')
+
           echo "RATE=$RATE" >> $GITHUB_ENV
           echo "DATE=$DATE" >> $GITHUB_ENV
 
-      - name: Send to Lark
+      # =========================
+      # BUILD & SEND CARD
+      # =========================
+
+      - name: Send Lark Card
         run: |
-          curl -X POST "${{ secrets.LARK_WEBHOOK }}" \
-          -H "Content-Type: application/json" \
-          -d "{\"msg_type\":\"text\",\"content\":{\"text\":\"📅 $DATE\n💱 USD/THB: $RATE\"}}"
+          JSON=$(jq -n \
+            --arg date "$DATE" \
+            --arg rate "$RATE" \
+            '{
+              msg_type: "interactive",
+              card: {
+                config: {
+                  wide_screen_mode: true
+                },
+                header: {
+                  title: {
+                    tag: "plain_text",
+                    content: "💱 USD/THB Exchange Rate"
+                  },
+                  template: "blue"
+                },
+                elements: [
+                  {
+                    tag: "div",
+                    text: {
+                      tag: "lark_md",
+                      content: "**📅 Date:** \($date)"
+                    }
+                  },
+                  {
+                    tag: "div",
+                    text: {
+                      tag: "lark_md",
+                      content: "**💱 Rate:** \($rate)"
+                    }
+                  }
+                ]
+              }
+            }')
+
+          curl -s -X POST \
+            "${{ secrets.LARK_WEBHOOK }}" \
+            -H "Content-Type: application/json" \
+            -d "$JSON"
