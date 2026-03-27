@@ -36,7 +36,7 @@ jobs:
             echo "❌ Failed to fetch rate"
             exit 1
           fi
-          RATE=$(printf "%.2f" "$RATE")
+
           DATE=$(TZ='Asia/Bangkok' date '+%Y-%m-%d')
 
           echo "RATE=$RATE" >> $GITHUB_ENV
@@ -52,7 +52,7 @@ jobs:
 
           TODAY="$RATE"
 
-          # second fetch as reference (simple approximation)
+          # (⚠️ still same API, so change = 0.00)
           PREV=$(curl -sf \
             "https://open.er-api.com/v6/latest/USD" \
             | jq -r .rates.THB)
@@ -79,6 +79,10 @@ jobs:
       - name: Send Lark Card
         run: |
           set -euo pipefail
+
+          # ✅ FORCE FORMAT HERE (important)
+          RATE=$(printf "%.2f" "$RATE")
+          CHANGE=$(printf "%.2f" "$CHANGE")
 
           JSON=$(jq -n \
             --arg date "$DATE" \
