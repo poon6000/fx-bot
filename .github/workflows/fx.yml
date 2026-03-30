@@ -48,7 +48,7 @@ jobs:
 
           echo "BOT Response received"
 
-		  # DEBUG - ดู response จริงจาก BOT
+		  # DEBUG - check raw response from BOT
           echo "=== RAW RESPONSE ==="
           echo "$DATA" | jq '.'
           echo "=== KEYS IN data_detail ==="
