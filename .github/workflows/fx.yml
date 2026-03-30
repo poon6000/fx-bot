@@ -35,7 +35,7 @@ jobs:
           HISTORY="history.csv"
 
           DATE=$(TZ='Asia/Bangkok' date '+%Y-%m-%d')
-          PREV_DATE=$(TZ='Asia/Bangkok' date -d 'yesterday' '+%Y-%m-%d')
+          PREV_DATE=$(TZ='Asia/Bangkok' date -d '4 days ago' '+%Y-%m-%d')
           DAY=$(TZ='Asia/Bangkok' date '+%u')
 
           SOURCE="BOT"
