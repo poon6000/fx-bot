@@ -42,8 +42,8 @@ jobs:
           # FETCH DATA FROM BOT API
           # =========================
           DATA=$(curl -sf --retry 3 --retry-delay 5 \
-            "https://apigw1.bot.or.th/bot/public/Stat-ExchangeRate/v2/DAILY_AVG_EXG_RATE_V2?start_period=$PREV_DATE&end_period=$DATE" \
-            -H "Authorization: Bearer ${{ secrets.BOT_API_TOKEN }}" \
+            "https://gateway.api.bot.or.th/Stat-ExchangeRate/v2/DAILY_AVG_EXG_RATE/?start_period=$PREV_DATE&end_period=$DATE" \
+            -H "Authorization: ${{ secrets.BOT_API_TOKEN }}" \
             -H "Accept: application/json")
 
           echo "BOT Response received"
