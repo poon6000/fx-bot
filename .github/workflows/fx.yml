@@ -35,30 +35,53 @@ jobs:
           HISTORY="history.csv"
 
           DATE=$(TZ='Asia/Bangkok' date '+%Y-%m-%d')
+          PREV_DATE=$(TZ='Asia/Bangkok' date -d 'yesterday' '+%Y-%m-%d')
           DAY=$(TZ='Asia/Bangkok' date '+%u')
 
           # =========================
-          # FETCH DATA (RETRY SAFE)
+          # FETCH DATA FROM BOT API
           # =========================
-          DATA=$(curl -sf --retry 3 --retry-delay 5 https://open.er-api.com/v6/latest/USD)
+          DATA=$(curl -sf --retry 3 --retry-delay 5 \
+            "https://apigw1.bot.or.th/bot/public/Stat-ExchangeRate/v2/DAILY_AVG_EXG_RATE_V2?start_period=$PREV_DATE&end_period=$DATE" \
+            -H "Authorization: Bearer ${{ secrets.BOT_API_TOKEN }}" \
+            -H "Accept: application/json")
 
-          USDTHB=$(echo "$DATA" | jq -r .rates.THB)
-          USDRMB=$(echo "$DATA" | jq -r .rates.CNY)
-          RMBTHB=$(echo "$DATA" | jq -r '.rates.THB / .rates.CNY')
+          echo "BOT Response received"
+
+          USDTHB=$(echo "$DATA" | jq -r '
+            .result.data.data_detail[]
+            | select(.currency_id == "USD")
+            | .mid_rate' | tail -1)
+
+          CNYTHB=$(echo "$DATA" | jq -r '
+            .result.data.data_detail[]
+            | select(.currency_id == "CNY")
+            | .mid_rate' | tail -1)
+
+          # คำนวณ USD/CNY cross rate
+          USDRMB=$(printf "%.2f" $(echo "scale=6; $USDTHB / $CNYTHB" | bc))
 
           USDTHB=$(printf "%.2f" "$USDTHB")
-          RMBTHB=$(printf "%.2f" "$RMBTHB")
-          USDRMB=$(printf "%.2f" "$USDRMB")
+          CNYTHB=$(printf "%.2f" "$CNYTHB")
+
+          if [ -z "$USDTHB" ] || [ "$USDTHB" = "null" ]; then
+            echo "❌ Failed to fetch BOT rate"
+            exit 1
+          fi
+
+          echo "✅ USD/THB: $USDTHB"
+          echo "✅ CNY/THB: $CNYTHB"
+          echo "✅ USD/CNY: $USDRMB"
 
           # =========================
           # LOAD PREVIOUS
           # =========================
           PREV_USD=$( [ -f "$FILE_USD" ] && cat "$FILE_USD" || echo "$USDTHB" )
-          PREV_RMB=$( [ -f "$FILE_RMB" ] && cat "$FILE_RMB" || echo "$RMBTHB" )
+          PREV_RMB=$( [ -f "$FILE_RMB" ] && cat "$FILE_RMB" || echo "$CNYTHB" )
           PREV_USDRMB=$( [ -f "$FILE_USDRMB" ] && cat "$FILE_USDRMB" || echo "$USDRMB" )
 
           CHANGE_USD=$(printf "%.2f" $(echo "$USDTHB - $PREV_USD" | bc))
-          CHANGE_RMB=$(printf "%.2f" $(echo "$RMBTHB - $PREV_RMB" | bc))
+          CHANGE_RMB=$(printf "%.2f" $(echo "$CNYTHB - $PREV_RMB" | bc))
           CHANGE_USDRMB=$(printf "%.2f" $(echo "$USDRMB - $PREV_USDRMB" | bc))
 
           ALERT=""
@@ -75,7 +98,6 @@ jobs:
             COLOR="grey"
           fi
 
-          # Alert logic
           ABS_CHANGE=$(echo "$CHANGE_USD" | sed 's/+//' | awk '{print ($1<0)?-$1:$1}')
           if (( $(echo "$ABS_CHANGE > 0.5" | bc -l) )); then
             ALERT="🚨 Significant USD/THB move!"
@@ -93,10 +115,10 @@ jobs:
           # SAVE DATA
           # =========================
           echo "$USDTHB" > "$FILE_USD"
-          echo "$RMBTHB" > "$FILE_RMB"
+          echo "$CNYTHB" > "$FILE_RMB"
           echo "$USDRMB" > "$FILE_USDRMB"
 
-          echo "$DATE,$USDTHB,$RMBTHB,$USDRMB" >> "$HISTORY"
+          echo "$DATE,$USDTHB,$CNYTHB,$USDRMB" >> "$HISTORY"
 
           # =========================
           # WEEKLY SUMMARY
@@ -115,7 +137,7 @@ jobs:
           JSON=$(jq -n \
             --arg date "$DATE" \
             --arg usd "$USDTHB" \
-            --arg rmb "$RMBTHB" \
+            --arg rmb "$CNYTHB" \
             --arg usdrmb "$USDRMB" \
             --arg change_usd "$CHANGE_USD" \
             --arg change_rmb "$CHANGE_RMB" \
@@ -130,7 +152,7 @@ jobs:
                 header: {
                   title: {
                     tag: "plain_text",
-                    content: ($trend + " FX Market Update")
+                    content: ($trend + " FX Market Update (BOT)")
                   },
                   template: $color
                 },
@@ -138,33 +160,41 @@ jobs:
                   { tag: "div", text: { tag: "lark_md", content: "**📅 Date:** \($date)" } },
                   { tag: "hr" },
                   { tag: "div", text: { tag: "lark_md", content: "**💱 USD/THB:** \($usd)\n📊 \($change_usd)" } },
-                  { tag: "div", text: { tag: "lark_md", content: "**💱 RMB/THB:** \($rmb)\n📊 \($change_rmb)" } },
-                  { tag: "div", text: { tag: "lark_md", content: "**🔄 USD/RMB:** \($usdrmb)\n📊 \($change_usdrmb)" } },
+                  { tag: "div", text: { tag: "lark_md", content: "**💱 CNY/THB:** \($rmb)\n📊 \($change_rmb)" } },
+                  { tag: "div", text: { tag: "lark_md", content: "**🔄 USD/CNY:** \($usdrmb)\n📊 \($change_usdrmb)" } },
                   { tag: "div", text: { tag: "lark_md", content: "\($alert)" } },
                   { tag: "div", text: { tag: "lark_md", content: "\($summary)" } },
                   { tag: "hr" },
-                  { tag: "note", elements: [ { tag: "plain_text", content: "FX Bot • Always Watching 👀" } ] }
+                  { tag: "note", elements: [ { tag: "plain_text", content: "Source: Bank of Thailand • Always Watching 👀" } ] }
                 ]
               }
             }')
 
-          curl -s -X POST "${{ secrets.LARK_WEBHOOK }}" \
+          RESPONSE=$(curl -s -X POST "${{ secrets.LARK_WEBHOOK }}" \
             -H "Content-Type: application/json" \
-            -d "$JSON"
+            -d "$JSON")
+
+          echo "Lark response: $RESPONSE"
+
+          CODE=$(echo "$RESPONSE" | jq -r .code)
+          if [ "$CODE" != "0" ]; then
+            echo "❌ Lark error: $CODE"
+            exit 1
+          fi
+
+          echo "✅ Message sent successfully!"
 
       - name: Send error alert if failed
         if: steps.fx.outcome == 'failure'
         run: |
           curl -X POST "${{ secrets.LARK_WEBHOOK }}" \
             -H "Content-Type: application/json" \
-            -d '{"msg_type":"text","content":{"text":"🚨 FX BOT FAILED"}}'
+            -d '{"msg_type":"text","content":{"text":"🚨 FX BOT FAILED - BOT API Error"}}'
 
       - name: Commit data safely
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-
           git add *.txt *.csv
-          git commit -m "Update FX data" || echo "No changes"
-
+          git commit -m "Update FX data from BOT" || echo "No changes"
           git push || echo "Push failed"
