@@ -1,4 +1,4 @@
-name: FX Rate Bot - Smart Fallback
+name: FX Rate Bot - Smart Auto (BOT + Fallback)
 
 on:
   schedule:
@@ -35,37 +35,35 @@ jobs:
           HISTORY="history.csv"
 
           DATE=$(TZ='Asia/Bangkok' date '+%Y-%m-%d')
-          PREV_DATE=$(TZ='Asia/Bangkok' date -d '4 days ago' '+%Y-%m-%d')
           DAY=$(TZ='Asia/Bangkok' date '+%u')
 
           SOURCE="BOT"
 
           # =========================
-          # TRY BOT API
+          # TRY BOT (ย้อนหลัง 7 วัน)
           # =========================
-          echo "🔄 Fetching from BOT..."
+          START=$(TZ='Asia/Bangkok' date -d '7 days ago' '+%Y-%m-%d')
 
           DATA=$(curl -sf --retry 3 --retry-delay 5 \
-            "https://gateway.api.bot.or.th/Stat-ExchangeRate/v2/DAILY_AVG_EXG_RATE/?start_period=$PREV_DATE&end_period=$DATE" \
+            "https://gateway.api.bot.or.th/Stat-ExchangeRate/v2/DAILY_AVG_EXG_RATE/?start_period=$START&end_period=$DATE" \
             -H "Authorization: ${{ secrets.BOT_API_TOKEN }}" \
             -H "Accept: application/json" || echo "")
 
           USDTHB=$(echo "$DATA" | jq -r '
             .result.data.data_detail[]?
-            | select(.currency_id == "USD" and .mid_rate != "")
+            | select(.currency_id=="USD" and .mid_rate != "")
             | .mid_rate' | tail -1)
 
           CNYTHB=$(echo "$DATA" | jq -r '
             .result.data.data_detail[]?
-            | select(.currency_id == "CNY" and .mid_rate != "")
+            | select(.currency_id=="CNY" and .mid_rate != "")
             | .mid_rate' | tail -1)
 
           # =========================
-          # FALLBACK TO ER API
+          # FALLBACK
           # =========================
           if [ -z "$USDTHB" ] || [ -z "$CNYTHB" ]; then
-            echo "⚠️ BOT empty → fallback ER API"
-
+            echo "⚠️ BOT missing → fallback ER API"
             SOURCE="ER API"
 
             ER=$(curl -sf https://open.er-api.com/v6/latest/USD)
@@ -87,18 +85,35 @@ jobs:
           echo "📊 Source: $SOURCE"
 
           # =========================
-          # LOAD PREVIOUS
+          # LOAD PREVIOUS (SAFE INIT)
           # =========================
-          PREV_USD=$( [ -f "$FILE_USD" ] && cat "$FILE_USD" || echo "$USDTHB" )
-          PREV_RMB=$( [ -f "$FILE_RMB" ] && cat "$FILE_RMB" || echo "$CNYTHB" )
-          PREV_USDRMB=$( [ -f "$FILE_USDRMB" ] && cat "$FILE_USDRMB" || echo "$USDRMB" )
-
-          CHANGE_USD=$(printf "%.2f" $(echo "$USDTHB - $PREV_USD" | bc))
-          CHANGE_RMB=$(printf "%.2f" $(echo "$CNYTHB - $PREV_RMB" | bc))
-          CHANGE_USDRMB=$(printf "%.2f" $(echo "$USDRMB - $PREV_USDRMB" | bc))
+          PREV_USD=$( [ -f "$FILE_USD" ] && cat "$FILE_USD" || echo "" )
+          PREV_RMB=$( [ -f "$FILE_RMB" ] && cat "$FILE_RMB" || echo "" )
+          PREV_USDRMB=$( [ -f "$FILE_USDRMB" ] && cat "$FILE_USDRMB" || echo "" )
 
           # =========================
-          # TREND
+          # CALCULATE CHANGE (FIXED)
+          # =========================
+          if [ -z "$PREV_USD" ]; then
+            CHANGE_USD="0.00"
+          else
+            CHANGE_USD=$(printf "%.2f" $(echo "$USDTHB - $PREV_USD" | bc))
+          fi
+
+          if [ -z "$PREV_RMB" ]; then
+            CHANGE_RMB="0.00"
+          else
+            CHANGE_RMB=$(printf "%.2f" $(echo "$CNYTHB - $PREV_RMB" | bc))
+          fi
+
+          if [ -z "$PREV_USDRMB" ]; then
+            CHANGE_USDRMB="0.00"
+          else
+            CHANGE_USDRMB=$(printf "%.2f" $(echo "$USDRMB - $PREV_USDRMB" | bc))
+          fi
+
+          # =========================
+          # SIGN + TREND
           # =========================
           if (( $(echo "$CHANGE_USD > 0" | bc -l) )); then
             TREND="📈"
@@ -121,11 +136,12 @@ jobs:
           fi
 
           # =========================
-          # SAVE
+          # SAVE (auto init works here)
           # =========================
           echo "$USDTHB" > "$FILE_USD"
           echo "$CNYTHB" > "$FILE_RMB"
           echo "$USDRMB" > "$FILE_USDRMB"
+
           echo "$DATE,$USDTHB,$CNYTHB,$USDRMB,$SOURCE" >> "$HISTORY"
 
           # =========================
@@ -166,12 +182,11 @@ jobs:
               }
             }')
 
-          RESPONSE=$(curl -s -X POST "${{ secrets.LARK_WEBHOOK }}" \
+          curl -s -X POST "${{ secrets.LARK_WEBHOOK }}" \
             -H "Content-Type: application/json" \
-            -d "$JSON")
+            -d "$JSON"
 
-          echo "Lark response: $RESPONSE"
-          echo "✅ Done"
+          echo "✅ Message sent"
 
       - name: Send error alert if failed
         if: steps.fx.outcome == 'failure'
