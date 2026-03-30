@@ -35,49 +35,45 @@ jobs:
           HISTORY="history.csv"
 
           DATE=$(TZ='Asia/Bangkok' date '+%Y-%m-%d')
-          PREV_DATE=$(TZ='Asia/Bangkok' date -d 'yesterday' '+%Y-%m-%d')
+          END_DATE=$(TZ='Asia/Bangkok' date '+%Y-%m-%d')
+          START_DATE=$(TZ='Asia/Bangkok' date -d '7 days ago' '+%Y-%m-%d')
           DAY=$(TZ='Asia/Bangkok' date '+%u')
 
           # =========================
           # FETCH DATA FROM BOT API
           # =========================
           DATA=$(curl -sf --retry 3 --retry-delay 5 \
-            "https://gateway.api.bot.or.th/Stat-ExchangeRate/v2/DAILY_AVG_EXG_RATE/?start_period=$PREV_DATE&end_period=$DATE" \
+            "https://gateway.api.bot.or.th/Stat-ExchangeRate/v2/DAILY_AVG_EXG_RATE/?start_period=$START_DATE&end_period=$END_DATE" \
             -H "Authorization: ${{ secrets.BOT_API_TOKEN }}" \
             -H "Accept: application/json")
 
           echo "BOT Response received"
 
-          # DEBUG - check raw response from BOT
-          echo "=== RAW RESPONSE ==="
-          echo "$DATA" | jq '.'
-          echo "=== KEYS IN data_detail ==="
-          echo "$DATA" | jq '.result.data.data_detail[0]'
-
+          # Get latest non-empty USD rate
           USDTHB=$(echo "$DATA" | jq -r '
-            .result.data.data_detail[]
-            | select(.currency_id == "USD")
-            | .mid_rate' | tail -1)
+            [.result.data.data_detail[]
+            | select(.currency_id == "USD" and .mid_rate != "")]
+            | last | .mid_rate')
 
+          # Get latest non-empty CNY rate
           CNYTHB=$(echo "$DATA" | jq -r '
-            .result.data.data_detail[]
-            | select(.currency_id == "CNY")
-            | .mid_rate' | tail -1)
-
-          # คำนวณ USD/CNY cross rate
-          USDRMB=$(printf "%.2f" $(echo "scale=6; $USDTHB / $CNYTHB" | bc))
-
-          USDTHB=$(printf "%.2f" "$USDTHB")
-          CNYTHB=$(printf "%.2f" "$CNYTHB")
+            [.result.data.data_detail[]
+            | select(.currency_id == "CNY" and .mid_rate != "")]
+            | last | .mid_rate')
 
           if [ -z "$USDTHB" ] || [ "$USDTHB" = "null" ]; then
-            echo "❌ Failed to fetch BOT rate"
+            echo "Failed to fetch BOT rate"
             exit 1
           fi
 
-          echo "✅ USD/THB: $USDTHB"
-          echo "✅ CNY/THB: $CNYTHB"
-          echo "✅ USD/CNY: $USDRMB"
+          # Calculate USD/CNY cross rate
+          USDRMB=$(printf "%.2f" $(echo "scale=6; $USDTHB / $CNYTHB" | bc))
+          USDTHB=$(printf "%.2f" "$USDTHB")
+          CNYTHB=$(printf "%.2f" "$CNYTHB")
+
+          echo "USD/THB: $USDTHB"
+          echo "CNY/THB: $CNYTHB"
+          echo "USD/CNY: $USDRMB"
 
           # =========================
           # LOAD PREVIOUS
@@ -93,20 +89,20 @@ jobs:
           ALERT=""
 
           if (( $(echo "$CHANGE_USD > 0" | bc -l) )); then
-            TREND="📈"
+            TREND="Up"
             COLOR="green"
             CHANGE_USD="+$CHANGE_USD"
           elif (( $(echo "$CHANGE_USD < 0" | bc -l) )); then
-            TREND="📉"
+            TREND="Down"
             COLOR="red"
           else
-            TREND="➡️"
+            TREND="Flat"
             COLOR="grey"
           fi
 
           ABS_CHANGE=$(echo "$CHANGE_USD" | sed 's/+//' | awk '{print ($1<0)?-$1:$1}')
           if (( $(echo "$ABS_CHANGE > 0.5" | bc -l) )); then
-            ALERT="🚨 Significant USD/THB move!"
+            ALERT="Significant USD/THB move!"
           fi
 
           if (( $(echo "$CHANGE_RMB > 0" | bc -l) )); then
@@ -134,7 +130,7 @@ jobs:
             WEEK_START=$(tail -n 5 "$HISTORY" | head -n 1 | cut -d',' -f2)
             WEEK_END=$USDTHB
             WEEK_CHANGE=$(printf "%.2f" $(echo "$WEEK_END - $WEEK_START" | bc))
-            SUMMARY="📊 Weekly USD/THB Change: $WEEK_CHANGE THB"
+            SUMMARY="Weekly USD/THB Change: $WEEK_CHANGE THB"
           fi
 
           # =========================
@@ -158,20 +154,20 @@ jobs:
                 header: {
                   title: {
                     tag: "plain_text",
-                    content: ($trend + " FX Market Update (BOT)")
+                    content: ("FX Market Update (BOT) - " + $trend)
                   },
                   template: $color
                 },
                 elements: [
-                  { tag: "div", text: { tag: "lark_md", content: "**📅 Date:** \($date)" } },
+                  { tag: "div", text: { tag: "lark_md", content: "**Date:** \($date)" } },
                   { tag: "hr" },
-                  { tag: "div", text: { tag: "lark_md", content: "**💱 USD/THB:** \($usd)\n📊 \($change_usd)" } },
-                  { tag: "div", text: { tag: "lark_md", content: "**💱 CNY/THB:** \($rmb)\n📊 \($change_rmb)" } },
-                  { tag: "div", text: { tag: "lark_md", content: "**🔄 USD/CNY:** \($usdrmb)\n📊 \($change_usdrmb)" } },
+                  { tag: "div", text: { tag: "lark_md", content: "**USD/THB:** \($usd)\nChange: \($change_usd)" } },
+                  { tag: "div", text: { tag: "lark_md", content: "**CNY/THB:** \($rmb)\nChange: \($change_rmb)" } },
+                  { tag: "div", text: { tag: "lark_md", content: "**USD/CNY:** \($usdrmb)\nChange: \($change_usdrmb)" } },
                   { tag: "div", text: { tag: "lark_md", content: "\($alert)" } },
                   { tag: "div", text: { tag: "lark_md", content: "\($summary)" } },
                   { tag: "hr" },
-                  { tag: "note", elements: [ { tag: "plain_text", content: "Source: Bank of Thailand • Always Watching 👀" } ] }
+                  { tag: "note", elements: [ { tag: "plain_text", content: "Source: Bank of Thailand" } ] }
                 ]
               }
             }')
@@ -184,18 +180,18 @@ jobs:
 
           CODE=$(echo "$RESPONSE" | jq -r .code)
           if [ "$CODE" != "0" ]; then
-            echo "❌ Lark error: $CODE"
+            echo "Lark error: $CODE"
             exit 1
           fi
 
-          echo "✅ Message sent successfully!"
+          echo "Message sent successfully"
 
       - name: Send error alert if failed
         if: steps.fx.outcome == 'failure'
         run: |
           curl -X POST "${{ secrets.LARK_WEBHOOK }}" \
             -H "Content-Type: application/json" \
-            -d '{"msg_type":"text","content":{"text":"🚨 FX BOT FAILED - BOT API Error"}}'
+            -d '{"msg_type":"text","content":{"text":"FX BOT FAILED - BOT API Error"}}'
 
       - name: Commit data safely
         run: |
