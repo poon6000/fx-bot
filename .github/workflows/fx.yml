@@ -48,6 +48,12 @@ jobs:
 
           echo "BOT Response received"
 
+		  # DEBUG - ดู response จริงจาก BOT
+          echo "=== RAW RESPONSE ==="
+          echo "$DATA" | jq '.'
+          echo "=== KEYS IN data_detail ==="
+          echo "$DATA" | jq '.result.data.data_detail[0]'
+
           USDTHB=$(echo "$DATA" | jq -r '
             .result.data.data_detail[]
             | select(.currency_id == "USD")
