@@ -2,7 +2,7 @@ name: FX Rate Bot - Smart Auto (BOT + Fallback)
 
 on:
   schedule:
-    - cron: '0 22 * * 0-5'  # 13:15 Thailand time
+    - cron: '0 0 * * 0-5'  # 13:15 Thailand time
   workflow_dispatch:
 
 permissions:
