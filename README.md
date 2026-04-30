@@ -19,7 +19,7 @@ Sends a daily Lark message card with USD/THB, USD/CNY, and CNY/THB exchange rate
 ## Prerequisites
 
 - [Node.js](https://nodejs.org/) v18 or later
-- A Bank of Thailand API token — register free at https://apideveloper.bot.or.th/
+- A Bank of Thailand API token — register free at https://portal.api.bot.or.th/
 - Lark webhook URLs (custom bot type)
 
 ---
@@ -64,7 +64,7 @@ You should see both webhooks respond with `StatusCode: 0` and cards appear in yo
 Run **once** in Command Prompt as Administrator to register the scheduled task:
 
 ```cmd
-schtasks /create /tn "FX Bot" /tr "node C:\Users\VIQ-Nattapan\projects\fx-bot\fx-bot.js" /sc WEEKLY /d MON,TUE,WED,THU,FRI /st 08:00 /f
+schtasks /create /tn "FX Bot" /tr "node %USERPROFILE%\projects\fx-bot\fx-bot.js" /sc WEEKLY /d MON,TUE,WED,THU,FRI /st 08:00 /f
 ```
 
 This runs the bot every weekday at **08:00 Bangkok time**.  

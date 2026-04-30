@@ -6,8 +6,8 @@ and sends a formatted message card to a Lark external group via custom webhook b
 
 ## Delivery Target
 - Platform: Lark (international)
-- Group Chat ID: oc_ef1fdfdfddaf55d9b6a2e5932d8371b6
-- Webhook URL: https://open.larksuite.com/open-apis/bot/v2/hook/a8210dc4-64fb-432d-a6b0-5acced3fc56f
+- Group Chat ID: stored in config.json (gitignored)
+- Webhook URLs: stored in config.json (gitignored)
 
 ## Data Source
 Bank of Thailand API:
