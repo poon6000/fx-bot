@@ -1,0 +1,7 @@
+{
+  "BOT_TOKEN": "your-bank-of-thailand-api-token-here",
+  "WEBHOOKS": [
+    "https://open.larksuite.com/open-apis/bot/v2/hook/your-test-webhook-id",
+    "https://open.larksuite.com/open-apis/bot/v2/hook/your-prod-webhook-id"
+  ]
+}
