@@ -1,6 +1,6 @@
 # FX Bot — Daily USD/THB & CNY/THB Rate Reporter
 
-Sends a daily Lark message card with USD/THB, USD/CNY, and CNY/THB exchange rates from the Bank of Thailand. Runs automatically on weekdays via Windows Task Scheduler. Sends weekend, holiday, and error cards so the group always gets a notification.
+Sends a daily Lark message card with USD/THB, USD/CNY, and CNY/THB exchange rates from the Bank of Thailand. Runs automatically on weekdays via Vercel cron. Sends weekend, holiday, and error cards so the group always gets a notification.
 
 ---
 
@@ -18,15 +18,16 @@ Sends a daily Lark message card with USD/THB, USD/CNY, and CNY/THB exchange rate
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org/) v18 or later
 - A Bank of Thailand API token — register free at https://portal.api.bot.or.th/
 - Lark webhook URLs (custom bot type)
+- A Vercel account (free) — https://vercel.com
+- [Node.js](https://nodejs.org/) v18 or later (local testing only)
 
 ---
 
 ## Setup
 
-### 1. Create your config file
+### 1. Create your config file (local testing only)
 
 Copy the example and fill in your credentials:
 
@@ -49,33 +50,70 @@ Edit `config.json`:
 > `config.json` is in `.gitignore` — it will never be committed.  
 > `WEBHOOKS` is an array — add as many groups as you like.
 
-### 2. Test manually
+### 2. Test locally
 
-```
-node fx-bot.js
+```powershell
+node $env:USERPROFILE\projects\fx-bot\fx-bot.js
 ```
 
 You should see both webhooks respond with `StatusCode: 0` and cards appear in your Lark groups.
 
 ---
 
-## Windows Task Scheduler (run automatically)
+## Vercel Deployment (runs automatically, PC not required)
 
-Run **once** in Command Prompt as Administrator to register the scheduled task:
+### 1. Push to GitHub
 
 ```cmd
-schtasks /create /tn "FX Bot" /tr "node %USERPROFILE%\projects\fx-bot\fx-bot.js" /sc WEEKLY /d MON,TUE,WED,THU,FRI /st 08:00 /f
+git push origin master
 ```
 
-This runs the bot every weekday at **08:00 Bangkok time**.  
-The bot handles weekends/holidays itself — Task Scheduler just needs to fire Mon–Fri.
+### 2. Create Vercel project
 
-### Manage the task
+- Go to **vercel.com** → **Add New Project** → import your `fx-bot` GitHub repo
+- Framework Preset: **Other**
+- Root Directory: **`./`** (default)
 
-```cmd
-schtasks /query /tn "FX Bot"          # check status
-schtasks /run /tn "FX Bot"            # run immediately
-schtasks /delete /tn "FX Bot" /f      # remove task
+### 3. Set environment variables
+
+In the Vercel dashboard go to **Settings → Environment Variables** and add:
+
+| Name | Value |
+|------|-------|
+| `BOT_TOKEN` | your Bank of Thailand API token |
+| `WEBHOOKS` | JSON array of webhook URLs (see format below) |
+
+`WEBHOOKS` must be a valid JSON array — double quotes required:
+```
+["https://open.larksuite.com/open-apis/bot/v2/hook/your-id-1","https://open.larksuite.com/open-apis/bot/v2/hook/your-id-2"]
+```
+
+### 4. Redeploy
+
+Go to **Deployments → Redeploy** after saving env vars.
+
+### 5. Test
+
+Open in browser:
+```
+https://your-project.vercel.app/api/fx-bot
+```
+
+Should return `{"ok":true}` and send a card to your Lark groups.
+
+### Cron schedule
+
+Defined in `vercel.json` — runs at **01:00 UTC = 08:00 Bangkok time**, Monday–Friday.
+
+```json
+{
+  "crons": [
+    {
+      "path": "/api/fx-bot",
+      "schedule": "0 1 * * 1-5"
+    }
+  ]
+}
 ```
 
 ---
@@ -84,7 +122,11 @@ schtasks /delete /tn "FX Bot" /f      # remove task
 
 ```
 fx-bot/
-├── fx-bot.js              # main script
+├── api/
+│   └── fx-bot.js          # Vercel serverless function (all logic)
+├── fx-bot.js              # local runner (loads config.json → env vars)
+├── vercel.json            # Vercel cron schedule
+├── package.json           # Node.js config for Vercel
 ├── config.json            # your credentials (gitignored)
 ├── config.example.json    # template — commit this, not config.json
 ├── .gitignore
@@ -95,7 +137,7 @@ fx-bot/
 
 ## Updating Thai holidays
 
-`THAI_HOLIDAYS` is defined at the top of `fx-bot.js`. Update it each January with the new year's public holiday schedule from the Bank of Thailand:  
+`THAI_HOLIDAYS` is defined at the top of `api/fx-bot.js`. Update it each January with the new year's public holiday schedule from the Bank of Thailand:  
 https://www.bot.or.th/en/financial-institutions/banking-holidays.html
 
 ---
@@ -105,6 +147,8 @@ https://www.bot.or.th/en/financial-institutions/banking-holidays.html
 | Problem | Likely cause |
 |---------|-------------|
 | `config.json not found` | Run `copy config.example.json config.json` and fill in credentials |
-| `Authorization field missing` | `BOT_TOKEN` in config.json is wrong or expired |
-| Card shows yesterday's date | Today's BOT data not yet published — this is normal before ~10:00 |
+| `Authorization field missing` | `BOT_TOKEN` is wrong or expired |
+| Card shows yesterday's date | Today's BOT data not yet published — normal before ~10:00 |
 | Webhook error | Check the webhook URL is still active in your Lark group settings |
+| Vercel 500 error | Check `WEBHOOKS` env var is valid JSON with double quotes around each URL |
+| Vercel cron not firing | Verify `vercel.json` is committed and the deployment is on Production |
