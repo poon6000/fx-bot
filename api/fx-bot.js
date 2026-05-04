@@ -4,8 +4,8 @@ const BOT_TOKEN = process.env.BOT_TOKEN;
 const WEBHOOKS = JSON.parse(process.env.WEBHOOKS || '[]');
 const USD_MARKUP = 3.00;
 
-// Thai public holidays 2026 (update each year)
-const THAI_HOLIDAYS = {
+// Thai government official public holidays 2026
+const THAI_NATIONAL_HOLIDAYS = {
   '2026-01-01': "New Year's Day",
   '2026-02-22': 'Makha Bucha Day',
   '2026-04-06': 'Chakri Memorial Day',
@@ -13,7 +13,9 @@ const THAI_HOLIDAYS = {
   '2026-04-14': 'Songkran Festival',
   '2026-04-15': 'Songkran Festival',
   '2026-05-01': 'National Labour Day',
+  '2026-05-04': 'Coronation Day',
   '2026-05-21': 'Visakha Bucha Day',
+  '2026-06-03': "Queen Suthida's Birthday",
   '2026-07-19': 'Asanha Bucha Day',
   '2026-07-20': 'Khao Phansa (Buddhist Lent)',
   '2026-07-28': "King Vajiralongkorn's Birthday",
@@ -22,6 +24,25 @@ const THAI_HOLIDAYS = {
   '2026-10-23': 'Chulalongkorn Memorial Day',
   '2026-12-05': "King Bhumibol's Birthday",
   '2026-12-10': 'Constitution Day',
+  '2026-12-31': "New Year's Eve",
+};
+
+// PHH (VIQ Group HQ) office holidays 2026 — sourced from company holiday announcement
+const PHH_HOLIDAYS = {
+  '2026-01-01': "New Year's Day",
+  '2026-01-02': 'Special Holiday',
+  '2026-03-03': 'Makha Bucha Day',
+  '2026-04-13': 'Songkran Festival',
+  '2026-04-14': 'Songkran Festival',
+  '2026-04-15': 'Songkran Festival',
+  '2026-05-01': 'National Labour Day',
+  '2026-06-03': "Queen Suthida's Birthday",
+  '2026-07-28': "King Vajiralongkorn's Birthday",
+  '2026-07-29': 'Asanha Bucha Day',
+  '2026-08-12': "Queen Mother's Birthday",
+  '2026-10-13': 'Anniversary of King Rama IX',
+  '2026-10-23': 'Chulalongkorn Memorial Day',
+  '2026-12-07': "Father's Day (substitute)",
   '2026-12-31': "New Year's Eve",
 };
 
@@ -81,7 +102,7 @@ async function fetchLatestRates() {
   for (let i = 0; i <= 14 && results.length < 2; i++) {
     const dateInfo = getBangkokDate(i);
     if (dateInfo.dayOfWeekNum === 0 || dateInfo.dayOfWeekNum === 6) continue;
-    if (THAI_HOLIDAYS[dateInfo.dateStr]) continue;
+    if (PHH_HOLIDAYS[dateInfo.dateStr]) continue;
 
     const rates = await fetchRatesForDate(dateInfo.dateStr);
     if (rates) results.push({ ...rates, dateInfo });
@@ -130,7 +151,7 @@ async function postToAllWebhooks(payload) {
 }
 
 // --- Cards ---
-function buildRateCard({ usd, cny, dateInfo }, previous) {
+function buildRateCard({ usd, cny, dateInfo }, previous, thaiHolidayName) {
   const usdThb   = parseFloat(usd.selling);
   const cnyThb   = parseFloat(cny.selling);
   const prevUsd  = previous ? parseFloat(previous.usd.selling) : null;
@@ -143,6 +164,46 @@ function buildRateCard({ usd, cny, dateInfo }, previous) {
   const prevUsdCny    = (prevUsd && prevCny) ? prevUsd / prevCny : null;
   const validUntil    = addCalendarDays(dateInfo.dateStr, 3);
 
+  const elements = [
+    { tag: 'markdown', content: `📅 ${dateInfo.dayOfWeek}, ${dateInfo.dateStr}` },
+    { tag: 'hr' },
+    {
+      tag: 'markdown',
+      content: [
+        `🇺🇸 **USD / THB**`,
+        `BOT Avg Selling: \`${usdThbStr}\`${trend(usdThb, prevUsd)}`,
+        `💼 Rate Applied (+${USD_MARKUP.toFixed(2)}): **${usdThbApplied}**`,
+        `📆 Valid until ${validUntil}`,
+      ].join('\n')
+    },
+    { tag: 'hr' },
+    {
+      tag: 'markdown',
+      content: [
+        `🔄 **USD / CNY**`,
+        `Cross Rate: \`${usdCny}\`${trend(usdThb / cnyThb, prevUsdCny)}`,
+      ].join('\n')
+    },
+    { tag: 'hr' },
+    {
+      tag: 'markdown',
+      content: [
+        `🇨🇳 **CNY / THB**`,
+        `BOT Avg Selling: \`${cnyThbStr}\`${trend(cnyThb, prevCny)}`,
+      ].join('\n')
+    },
+    { tag: 'hr' },
+    { tag: 'markdown', content: `📌 _Source: Bank of Thailand (bot.or.th)_` }
+  ];
+
+  if (thaiHolidayName) {
+    elements.push({ tag: 'hr' });
+    elements.push({
+      tag: 'markdown',
+      content: `🇹🇭 _Thai public holiday: **${thaiHolidayName}** — PHH operates as normal_`
+    });
+  }
+
   return {
     msg_type: 'interactive',
     card: {
@@ -151,40 +212,7 @@ function buildRateCard({ usd, cny, dateInfo }, previous) {
         title: { tag: 'plain_text', content: '💱 Daily FX Rates' },
         template: 'blue'
       },
-      body: {
-        direction: 'vertical',
-        elements: [
-          { tag: 'markdown', content: `📅 ${dateInfo.dayOfWeek}, ${dateInfo.dateStr}` },
-          { tag: 'hr' },
-          {
-            tag: 'markdown',
-            content: [
-              `🇺🇸 **USD / THB**`,
-              `BOT Avg Selling: \`${usdThbStr}\`${trend(usdThb, prevUsd)}`,
-              `💼 Rate Applied (+${USD_MARKUP.toFixed(2)}): **${usdThbApplied}**`,
-              `📆 Valid until ${validUntil}`,
-            ].join('\n')
-          },
-          { tag: 'hr' },
-          {
-            tag: 'markdown',
-            content: [
-              `🔄 **USD / CNY**`,
-              `Cross Rate: \`${usdCny}\`${trend(usdThb / cnyThb, prevUsdCny)}`,
-            ].join('\n')
-          },
-          { tag: 'hr' },
-          {
-            tag: 'markdown',
-            content: [
-              `🇨🇳 **CNY / THB**`,
-              `BOT Avg Selling: \`${cnyThbStr}\`${trend(cnyThb, prevCny)}`,
-            ].join('\n')
-          },
-          { tag: 'hr' },
-          { tag: 'markdown', content: `📌 _Source: Bank of Thailand (bot.or.th)_` }
-        ]
-      }
+      body: { direction: 'vertical', elements }
     }
   };
 }
@@ -212,13 +240,13 @@ function buildWeekendCard(dateInfo) {
 }
 
 function buildHolidayCard(dateInfo) {
-  const name = THAI_HOLIDAYS[dateInfo.dateStr];
+  const name = PHH_HOLIDAYS[dateInfo.dateStr];
   return {
     msg_type: 'interactive',
     card: {
       schema: '2.0',
       header: {
-        title: { tag: 'plain_text', content: '🎌 Public Holiday — No FX Rate Today' },
+        title: { tag: 'plain_text', content: '🎌 PHH Holiday — No FX Rate Today' },
         template: 'yellow'
       },
       body: {
@@ -226,7 +254,7 @@ function buildHolidayCard(dateInfo) {
         elements: [
           {
             tag: 'markdown',
-            content: `📅 ${dateInfo.dateStr} — **${name}**\n\nBank of Thailand does not publish exchange rates on public holidays.`
+            content: `📅 ${dateInfo.dateStr} — **${name}**\n\nPHH office is closed today. No exchange rate published.`
           }
         ]
       }
@@ -267,10 +295,15 @@ async function main() {
     return;
   }
 
-  if (THAI_HOLIDAYS[todayInfo.dateStr]) {
-    console.log(`Public holiday (${THAI_HOLIDAYS[todayInfo.dateStr]}) — sending holiday card.`);
+  if (PHH_HOLIDAYS[todayInfo.dateStr]) {
+    console.log(`PHH holiday (${PHH_HOLIDAYS[todayInfo.dateStr]}) — sending holiday card.`);
     await postToAllWebhooks(buildHolidayCard(todayInfo));
     return;
+  }
+
+  const thaiHolidayName = THAI_NATIONAL_HOLIDAYS[todayInfo.dateStr] || null;
+  if (thaiHolidayName) {
+    console.log(`Thai national holiday (${thaiHolidayName}) but PHH works — fetching rates with note.`);
   }
 
   try {
@@ -282,7 +315,7 @@ async function main() {
     if (result.current.dateInfo.dateStr !== todayInfo.dateStr) {
       console.log(`Today's data not yet published, using ${result.current.dateInfo.dateStr}`);
     }
-    await postToAllWebhooks(buildRateCard(result.current, result.previous));
+    await postToAllWebhooks(buildRateCard(result.current, result.previous, thaiHolidayName));
   } catch (err) {
     console.error('Error:', err.message);
     try {
